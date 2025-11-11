@@ -1,0 +1,111 @@
+# ═══════════════════════════════════════════════════════════════
+# TESTES - ARQUITETURA ORIENTADA A EVENTOS
+# ═══════════════════════════════════════════════════════════════
+
+### 1. Health Check - Orders Service
+GET http://localhost:3003/health
+
+###
+
+### 2. Health Check - Notification Service
+GET http://localhost:3005/health
+
+###
+
+### 3. Listar Pedidos
+GET http://localhost:3003/v1/orders
+
+###
+
+### 4. Criar um pedido (exemplo)
+# Primeiro, certifique-se de ter clientes e produtos criados!
+POST http://localhost:3003/v1/orders
+Content-Type: application/json
+
+{
+  "clientId": 1,
+  "items": [
+    {
+      "productId": 1,
+      "quantity": 2
+    }
+  ]
+}
+
+###
+
+### 5. 🔥 TESTAR EVENTOS - Atualizar Status do Pedido
+# Substitua {orderId} pelo ID real do pedido criado acima
+# Quando você executar este endpoint, o Orders Service vai:
+# 1. Atualizar o status no banco de dados
+# 2. Publicar um evento no RabbitMQ
+# 3. O Notification Service vai RECEBER o evento automaticamente
+# 4. Você verá a notificação no console do Notification Service!
+
+PUT http://localhost:3003/v1/orders/674df37c0edccf2b40cfee4d/status
+Content-Type: application/json
+
+{
+  "status": "PAGO"
+}
+
+###
+
+### 6. Testar outro status
+PUT http://localhost:3003/v1/orders/674df37c0edccf2b40cfee4d/status
+Content-Type: application/json
+
+{
+  "status": "EM SEPARAÇÃO"
+}
+
+###
+
+### 7. Testar status de envio
+PUT http://localhost:3003/v1/orders/674df37c0edccf2b40cfee4d/status
+Content-Type: application/json
+
+{
+  "status": "ENVIADO"
+}
+
+###
+
+### 8. Testar status de entrega
+PUT http://localhost:3003/v1/orders/674df37c0edccf2b40cfee4d/status
+Content-Type: application/json
+
+{
+  "status": "ENTREGUE"
+}
+
+###
+
+# ═══════════════════════════════════════════════════════════════
+# COMO TESTAR:
+# ═══════════════════════════════════════════════════════════════
+# 
+# 1. Inicie todos os serviços:
+#    docker-compose up --build
+#
+# 2. Abra DOIS terminais/consoles:
+#    - Um para ver logs do Orders Service
+#    - Outro para ver logs do Notification Service
+#
+# 3. Execute os endpoints acima
+#
+# 4. Observe nos logs:
+#    - Orders Service: "[RabbitMQ] ✓ Evento publicado: order.status.changed"
+#    - Notification Service: "🔔 NOVA NOTIFICAÇÃO" com todos os detalhes
+#
+# 5. Acesse RabbitMQ Management UI:
+#    http://localhost:15672
+#    User: admin
+#    Password: password
+#    
+#    Lá você pode ver:
+#    - Exchanges criados
+#    - Queues criadas
+#    - Mensagens sendo processadas
+#
+# ═══════════════════════════════════════════════════════════════

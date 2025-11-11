@@ -138,6 +138,7 @@ services:
       PORT: 3003
       CLIENTS_SERVICE_URL: "http://clients-service:3002"
       PRODUCTS_SERVICE_URL: "http://products-service:3001"
+      RABBITMQ_URL: "amqp://admin:password@rabbitmq:5672"
     ports:
       - "3003:3003"
     depends_on:
@@ -146,6 +147,8 @@ services:
       products-service:
         condition: service_healthy
       clients-service:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - ecommerce_network
@@ -182,6 +185,27 @@ services:
       timeout: 10s
       retries: 3
 
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - ecommerce_network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Notification Service
   notification-service:
     build: ./notification-service
@@ -189,8 +213,12 @@ services:
     restart: always
     environment:
       PORT: 3005
+      RABBITMQ_URL: "amqp://admin:password@rabbitmq:5672"
     ports:
       - "3005:3005"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - ecommerce_network
     healthcheck:
@@ -206,6 +234,8 @@ services:
     restart: always
     environment:
       INFLUXDB_DB: k6payments
+      INFLUXDB_ADMIN_USER: admin
+      INFLUXDB_ADMIN_PASSWORD: admin
       INFLUXDB_HTTP_AUTH_ENABLED: "false"
     ports:
       - "8086:8086"
@@ -242,6 +272,7 @@ services:
     depends_on:
       - influxdb
       - payments-service
+      - orders-service
 
 volumes:
   products_data:
@@ -250,6 +281,7 @@ volumes:
   orders_data:
   influxdb_data:
   grafana_data:
+  rabbitmq_data:
 
 networks:
   ecommerce_network:

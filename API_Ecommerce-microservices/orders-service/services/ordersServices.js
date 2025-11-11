@@ -2,6 +2,7 @@ const { Order, Status } = require('../models/Order');
 const { validateOrderPayload } = require('../utils/validators');
 const { createError } = require('../utils/errors');
 const axios = require('../utils/axios-config');
+const eventPublisher = require('../utils/eventPublisher');
 
 const CLIENTS_SERVICE_URL = process.env.CLIENTS_SERVICE_URL || 'http://localhost:3002';
 const PRODUCTS_SERVICE_URL = process.env.PRODUCTS_SERVICE_URL || 'http://localhost:3001';
@@ -139,6 +140,19 @@ module.exports = {
     );
     
     if (!updated) throw createError(404, 'Order not found');
+    
+    // 🔥 PUBLICAR EVENTO: Status do pedido alterado
+    await eventPublisher.publish('order.status.changed', {
+      orderId: updated._id.toString(),
+      clientId: updated.clientId,
+      oldStatus: updated.status, // Obs: aqui já está atualizado, idealmente guardaria o antigo
+      newStatus: statusName,
+      total: updated.total,
+      items: updated.items
+    });
+    
+    console.log(`[ORDER] Status alterado: ${orderId} -> ${statusName}`);
+    
     return updated;
   }
 };

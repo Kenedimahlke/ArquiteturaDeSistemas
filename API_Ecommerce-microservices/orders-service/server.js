@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const ordersRoutes = require('./routes/ordersRoutes');
+const eventPublisher = require('./utils/eventPublisher');
 
 const app = express();
 app.use(express.json());
@@ -16,6 +17,12 @@ mongoose.connect(MONGODB_URL)
     console.error('MongoDB connection error:', error);
     process.exit(1);
   });
+
+// Connect to RabbitMQ
+eventPublisher.connect().catch(err => {
+  console.error('Failed to connect to RabbitMQ:', err);
+  // N�o mata o processo, permite reconex�o
+});
 
 app.use('/v1/orders', ordersRoutes);
 
@@ -33,7 +40,7 @@ app.use((err, req, res, next) => {
   
   // Trata erros de JSON malformado
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    return res.status(400).json({ erro: 'Dados JSON inválidos' });
+    return res.status(400).json({ erro: 'Dados JSON inv�lidos' });
   }
   
   res.status(err.status || 500).json({ erro: err.message || 'Internal Error!' });
@@ -41,3 +48,11 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => console.log(`Orders Service running on http://localhost:${PORT}`));
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down gracefully...');
+  await eventPublisher.close();
+  await mongoose.connection.close();
+  process.exit(0);
+});
