@@ -3,6 +3,7 @@ const { validateOrderPayload } = require('../utils/validators');
 const { createError } = require('../utils/errors');
 const axios = require('../utils/axios-config');
 const eventPublisher = require('../utils/eventPublisher');
+const kafkaProducer = require('../utils/kafkaProducer');
 
 const CLIENTS_SERVICE_URL = process.env.CLIENTS_SERVICE_URL || 'http://localhost:3002';
 const PRODUCTS_SERVICE_URL = process.env.PRODUCTS_SERVICE_URL || 'http://localhost:3001';
@@ -94,18 +95,21 @@ module.exports = {
     const order = new Order(orderData);
     const savedOrder = await order.save();
 
-    // 5. Se houver pagamentos, processar via payments-service
+    // 5. Se houver pagamentos, enviar para Kafka (desacoplado)
     if (payments && Array.isArray(payments) && payments.length > 0) {
       try {
-        // O payments-service espera: { payments: [{typePaymentId, amount}] }
-        const paymentsServiceUrl = process.env.PAYMENTS_SERVICE_URL || 'http://payments-service:3004';
-        const response = await axios.post(`${paymentsServiceUrl}/v1/payments/${savedOrder._id}/process`, { payments });
-        // Opcional: atualizar status do pedido localmente se necessário
-        // return { order: savedOrder, paymentResult: response.data };
-        // Para manter compatibilidade, retorna só o pedido
+        await kafkaProducer.publishOrder('payment.requested', {
+          orderId: savedOrder._id.toString(),
+          clientId: savedOrder.clientId,
+          items: savedOrder.items,
+          total: savedOrder.total,
+          payments: payments
+        });
+        console.log(`✓ Payment request sent to Kafka for order ${savedOrder._id}`);
       } catch (error) {
         // Não impede a criação do pedido, mas loga o erro
-        console.error('Erro ao processar pagamento inicial:', error.response?.data || error.message);
+        console.error('✗ Failed to send payment request to Kafka:', error.message);
+        // Aqui poderíamos implementar uma fila de retry ou dead letter queue
       }
     }
 

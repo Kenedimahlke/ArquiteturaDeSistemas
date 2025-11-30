@@ -199,6 +199,64 @@ curl -X POST http://localhost:3004/v1/payments/process/uuid-do-pedido \
   }'
 ```
 
+## Acesso via Kong Gateway
+
+Todos os endpoints públicos devem ser acessados via Kong na porta 8000:
+
+```
+http://localhost:8000/v1/...
+```
+
+- **Rate Limit:** 10 req/min
+- **Max Request Size:** 200KB
+- **Cache:** Redis para rotas /users/:id, /products, /orders/:id, /payments/types
+- **Acesso direto aos serviços é bloqueado (exceto notification-service, que é interno)**
+
+### Exemplo de fluxo completo via Kong
+
+#### 1. Criar Pedido
+```bash
+curl -X POST http://localhost:8000/v1/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": "uuid-do-cliente",
+    "items": [{ "productId": "uuid-do-produto", "quantity": 1 }]
+  }'
+```
+
+#### 2. Listar Tipos de Pagamento
+```bash
+curl http://localhost:8000/v1/payments/types
+```
+
+#### 3. Processar Pagamento (corpo correto)
+```bash
+curl -X POST http://localhost:8000/v1/payments/process/uuid-do-pedido \
+  -H "Content-Type: application/json" \
+  -d '{
+    "payments": [
+      { "typePaymentId": "uuid-do-tipo-pagamento", "amount": 1200 }
+    ]
+  }'
+```
+
+- O campo `payments` deve ser um array de objetos `{typePaymentId, amount}`.
+- O endpoint só aceita IDs válidos (ObjectId ou UUID) conforme regex da rota Kong.
+
+#### 4. Verificar Notificação
+- O notification-service consome eventos de pagamento via RabbitMQ e loga:
+  - `{nomeCliente}, seu pedido foi PAGO com sucesso e será despachado em breve.`
+- Verifique os logs com:
+```bash
+docker compose logs notification-service --tail=60
+```
+
+#### Observação sobre rotas Kong
+- O regex das rotas de pagamento no Kong deve usar prefixo `~` para regex:
+  - `~/v1/payments/process/[a-fA-F0-9\-]{24,36}`
+  - `~/v1/payments/process/\d+`
+- Se receber "no Route matched with those values", revise o regex e reinicie o Kong.
+
 ## Características Técnicas
 
 ### Comunicação Síncrona

@@ -1,7 +1,9 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { createError } = require('../utils/errors');
+
 const axios = require('../utils/axios-config');
+const NotificationProducer = require('../utils/notificationProducer');
 
 const ORDERS_SERVICE_URL = process.env.ORDERS_SERVICE_URL || 'http://localhost:3003';
 const CLIENTS_SERVICE_URL = process.env.CLIENTS_SERVICE_URL || 'http://localhost:3002';
@@ -125,22 +127,36 @@ module.exports = {
       throw createError(500, 'Payment processed but failed to update order status');
     }
     
-    // 4. Se o pagamento foi aprovado e o pedido está totalmente pago, notificar o cliente
+
+    // 4. Se o pagamento foi aprovado e o pedido está totalmente pago, notificar o cliente via RabbitMQ
     if (allPaymentsSuccessful && totalAllPayments >= order.total) {
       try {
         // Buscar informações do pedido novamente para pegar dados do cliente
         const orderResponse = await axios.get(`${ORDERS_SERVICE_URL}/v1/orders/${orderId}`);
         const order = orderResponse.data;
 
-        // Chamar notification-service
-        const notificationServiceUrl = process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:3005';
-        await axios.post(`${notificationServiceUrl}/v1/notifications`, {
+        // Buscar nome do cliente
+        let clientName = '';
+        try {
+          const clientResponse = await axios.get(`${CLIENTS_SERVICE_URL}/v1/clients/${order.clientId}`);
+          clientName = clientResponse.data?.name || '';
+        } catch (err) {
+          console.error('Erro ao buscar nome do cliente:', err.response?.data || err.message);
+        }
+
+        // Publicar evento no RabbitMQ
+        const notificationProducer = new NotificationProducer();
+        await notificationProducer.connect();
+        await notificationProducer.publishNotification({
+          orderId,
           clientId: order.clientId,
-          title: 'Pagamento confirmado',
-          message: `Seu pedido ${orderId} foi totalmente pago e está confirmado!`
+          clientName,
+          total: order.total,
+          newStatus: 'PAGO',
         });
+        await notificationProducer.close();
       } catch (error) {
-        console.error('Error sending notification:', error.response?.data || error.message);
+        console.error('Error sending notification event to RabbitMQ:', error.response?.data || error.message);
         // Não falhar o pagamento por conta da notificação
       }
     }

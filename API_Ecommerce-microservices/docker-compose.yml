@@ -94,10 +94,13 @@ services:
     environment:
       DATABASE_URL: "postgresql://postgres:password@products-db:5432/products_db"
       PORT: 3001
+      REDIS_URL: "redis://redis:6379"
     ports:
       - "3001:3001"
     depends_on:
       products-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - ecommerce_network
@@ -115,10 +118,13 @@ services:
     environment:
       DATABASE_URL: "postgresql://postgres:password@clients-db:5432/clients_db"
       PORT: 3002
+      REDIS_URL: "redis://redis:6379"
     ports:
       - "3002:3002"
     depends_on:
       clients-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - ecommerce_network
@@ -139,6 +145,9 @@ services:
       CLIENTS_SERVICE_URL: "http://clients-service:3002"
       PRODUCTS_SERVICE_URL: "http://products-service:3001"
       RABBITMQ_URL: "amqp://admin:password@rabbitmq:5672"
+      REDIS_URL: "redis://redis:6379"
+      KAFKA_BROKER: "kafka:9093"
+      KAFKA_TOPIC_PAYMENTS: "payment-requests"
     ports:
       - "3003:3003"
     depends_on:
@@ -149,6 +158,8 @@ services:
       clients-service:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - ecommerce_network
@@ -168,6 +179,10 @@ services:
       PORT: 3004
       ORDERS_SERVICE_URL: "http://orders-service:3003"
       CLIENTS_SERVICE_URL: "http://clients-service:3002"
+      REDIS_URL: "redis://redis:6379"
+      KAFKA_BROKER: "kafka:9093"
+      KAFKA_TOPIC_PAYMENTS: "payment-requests"
+      KAFKA_GROUP_ID: "payments-consumer-group"
     ports:
       - "3004:3004"
     depends_on:
@@ -177,6 +192,10 @@ services:
         condition: service_healthy
       clients-service:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
     networks:
       - ecommerce_network
     healthcheck:
@@ -184,6 +203,179 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Zookeeper for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: always
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - ecommerce_network
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka Broker
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    restart: always
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9093,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - ecommerce_network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Kafka UI
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    restart: always
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ecommerce-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - ecommerce_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Commander UI
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis_commander
+    restart: always
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - ecommerce_network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Kong Database
+  kong-database:
+    image: postgres:15
+    container_name: kong_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: kong
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: kongpass
+    ports:
+      - "5436:5432"
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong -d kong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kong Migration
+  kong-migration:
+    image: kong:3.5
+    container_name: kong_migration
+    command: kong migrations bootstrap
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_PORT: 5432
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kongpass
+      KONG_PG_DATABASE: kong
+    networks:
+      - ecommerce_network
+    depends_on:
+      kong-database:
+        condition: service_healthy
+    restart: on-failure
+
+  # Kong API Gateway
+  kong:
+    image: kong:3.5
+    container_name: kong_gateway
+    restart: always
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_PORT: 5432
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kongpass
+      KONG_PG_DATABASE: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_GUI_URL: http://localhost:8002
+    ports:
+      - "8000:8000"  # Proxy HTTP
+      - "8443:8443"  # Proxy HTTPS
+      - "8001:8001"  # Admin API
+      - "8002:8002"  # Admin GUI
+    networks:
+      - ecommerce_network
+    depends_on:
+      kong-database:
+        condition: service_healthy
+      kong-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # RabbitMQ Message Broker
   rabbitmq:
@@ -206,7 +398,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Notification Service
+  # Notification Service (Internal only - no external access)
   notification-service:
     build: ./notification-service
     container_name: notification_service
@@ -214,13 +406,12 @@ services:
     environment:
       PORT: 3005
       RABBITMQ_URL: "amqp://admin:password@rabbitmq:5672"
-    ports:
-      - "3005:3005"
+    # NOTE: No external ports exposed - internal communication only
+    networks:
+      - ecommerce_network
     depends_on:
       rabbitmq:
         condition: service_healthy
-    networks:
-      - ecommerce_network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3005/health || exit 1"]
       interval: 30s
@@ -274,6 +465,28 @@ services:
       - payments-service
       - orders-service
 
+  # Kong Configuration Service
+  kong-config:
+    image: curlimages/curl:latest
+    container_name: kong_config
+    volumes:
+      - ./kong-config.sh:/kong-config.sh
+    entrypoint: ["/bin/sh", "/kong-config.sh"]
+    networks:
+      - ecommerce_network
+    depends_on:
+      kong:
+        condition: service_healthy
+      products-service:
+        condition: service_healthy
+      clients-service:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+      payments-service:
+        condition: service_healthy
+    restart: on-failure
+
 volumes:
   products_data:
   clients_data:
@@ -282,6 +495,8 @@ volumes:
   influxdb_data:
   grafana_data:
   rabbitmq_data:
+  redis_data:
+  kong_data:
 
 networks:
   ecommerce_network:

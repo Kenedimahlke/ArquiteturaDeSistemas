@@ -1,6 +1,7 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const paymentsRoutes = require('./routes/paymentsRoutes');
+const consumer = require('./utils/kafkaConsumer');
 
 const prisma = new PrismaClient();
 const app = express();
@@ -28,4 +29,20 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3004;
-app.listen(PORT, () => console.log(`Payments Service running on http://localhost:${PORT}`));
+
+// Iniciar servidor HTTP
+app.listen(PORT, () => {
+  console.log(`Payments Service running on http://localhost:${PORT}`);
+  
+  // Iniciar Kafka Consumer após o servidor estar rodando
+  if (process.env.KAFKA_BROKER) {
+    consumer.connect().catch(err => {
+      console.error('Failed to start Kafka Consumer:', err);
+    });
+    // Graceful shutdown
+    process.on('SIGTERM', () => consumer.close());
+    process.on('SIGINT', () => consumer.close());
+  } else {
+    console.log('⚠ Kafka Consumer disabled (KAFKA_BROKER not configured)');
+  }
+});

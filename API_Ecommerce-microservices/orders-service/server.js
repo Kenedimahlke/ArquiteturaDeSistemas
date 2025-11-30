@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const ordersRoutes = require('./routes/ordersRoutes');
 const eventPublisher = require('./utils/eventPublisher');
+const kafkaProducer = require('./utils/kafkaProducer');
 
 const app = express();
 app.use(express.json());
@@ -21,8 +22,18 @@ mongoose.connect(MONGODB_URL)
 // Connect to RabbitMQ
 eventPublisher.connect().catch(err => {
   console.error('Failed to connect to RabbitMQ:', err);
-  // N�o mata o processo, permite reconex�o
+  // Não mata o processo, permite reconexão
 });
+
+// Connect to Kafka Producer
+if (process.env.KAFKA_BROKER) {
+  kafkaProducer.connect().catch(err => {
+    console.error('Failed to connect to Kafka Producer:', err);
+    // Não mata o processo, permite reconexão
+  });
+} else {
+  console.log('⚠ Kafka Producer disabled (KAFKA_BROKER not configured)');
+}
 
 app.use('/v1/orders', ordersRoutes);
 

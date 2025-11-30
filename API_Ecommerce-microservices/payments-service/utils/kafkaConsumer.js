@@ -12,7 +12,8 @@ class KafkaConsumer {
 
   async connect() {
     try {
-      const brokers = (process.env.KAFKA_BROKERS || 'localhost:9093').split(',');
+
+      const brokers = (process.env.KAFKA_BROKERS || process.env.KAFKA_BROKER || 'localhost:9093').split(',');
       
       console.log('[Kafka Consumer] Conectando ao Kafka...', brokers);
       
@@ -57,8 +58,8 @@ class KafkaConsumer {
               paymentsLength: value.payments?.length || 0
             });
 
-            // Processar evento de pedido criado
-            if (eventType === 'order.created' && value.payments && value.payments.length > 0) {
+            // Processar evento de requisição de pagamento
+            if ((eventType === 'order.created' || eventType === 'payment.requested') && value.payments && value.payments.length > 0) {
               console.log(`[Kafka Consumer] Processando pagamentos do pedido ${value.orderId}...`);
               
               // Chamar o endpoint REST de processamento de pagamento
@@ -67,12 +68,13 @@ class KafkaConsumer {
                   `${PAYMENTS_SERVICE_URL}/v1/payments/process/${value.orderId}`,
                   { payments: value.payments }
                 );
-                console.log(`[Kafka Consumer] Pagamentos processados:`, response.data);
+                console.log(`[Kafka Consumer] ✓ Pagamentos processados com sucesso:`, response.data);
               } catch (error) {
-                console.error('[Kafka Consumer] Erro ao processar pagamento:', error.response?.data || error.message);
+                console.error('[Kafka Consumer] ✗ Erro ao processar pagamento:', error.response?.data || error.message);
+                // TODO: Implementar retry ou dead letter queue
               }
             } else {
-              console.log('[Kafka Consumer] Evento ignorado - condições não atendidas');
+              console.log('[Kafka Consumer] Evento ignorado (type: ${eventType}, has payments: ${!!value.payments})');
             }
 
           } catch (error) {
