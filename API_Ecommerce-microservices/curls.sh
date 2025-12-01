@@ -25,10 +25,8 @@ curl --request POST \
   --header 'Content-Type: application/json' \
   --data '{
     "name": "Notebook Dell",
-    "description": "Notebook Dell Inspiron 15",
     "price": 3500.00,
-    "stock": 10,
-    "category": "Eletrônicos"
+    "stock": 10
   }'
 
 # Atualizar produto
@@ -37,10 +35,8 @@ curl --request PUT \
   --header 'Content-Type: application/json' \
   --data '{
     "name": "Notebook Dell Updated",
-    "description": "Notebook Dell Inspiron 15 - Atualizado",
     "price": 3200.00,
-    "stock": 15,
-    "category": "Eletrônicos"
+    "stock": 15
   }'
 
 # Atualizar estoque do produto
@@ -77,10 +73,7 @@ curl --request POST \
   --header 'Content-Type: application/json' \
   --data '{
     "name": "João Silva",
-    "email": "joao.silva@email.com",
-    "cpf": "12345678901",
-    "phone": "(11) 98765-4321",
-    "address": "Rua das Flores, 123"
+    "email": "joao.silva@email.com"
   }'
 
 # Atualizar cliente
@@ -89,9 +82,7 @@ curl --request PUT \
   --header 'Content-Type: application/json' \
   --data '{
     "name": "João Silva Updated",
-    "email": "joao.silva.updated@email.com",
-    "phone": "(11) 91111-2222",
-    "address": "Rua das Rosas, 456"
+    "email": "joao.silva.updated@email.com"
   }'
 
 # Deletar cliente
